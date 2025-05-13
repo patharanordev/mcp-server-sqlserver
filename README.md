@@ -81,24 +81,40 @@ Ex. using MCP Server via [LangChain](https://github.com/patharanordev/learn-lang
 From dbo.NOTIFICATION in master database, which customer id who did not read notification yet?
 ================================== Ai Message ==================================
 
-[
-    {
-        'type': 'text', 
-        'text': 'To get the customer IDs that have unread notifications in the dbo.NOTIFICATION table, we can run the following SQL query using the run_safe_diagnostic tool:'
-    }, {
-        'type': 'tool_use', 
-        'name': 'run_safe_diagnostic', 
-        'input': {
-            'db': 'master', 
-            'sql': 'SELECT DISTINCT CUST_ID \nFROM dbo.NOTIFICATION\nWHERE IS_READ = 0;'
-        }, 
-        'id': 'tooluse_CBvB-H5VRP-x-XnGoATY2g'
-    }
-]
+[{'type': 'text', 'text': 'To get the list of customer IDs that have unread notifications in the dbo.NOTIFICATION table, we can run the following SQL query using the run_safe_diagnostic tool:'}, {'type': 'tool_use', 'name': 'run_safe_diagnostic', 'input': {'db': 'master', 'sql': 'SELECT DISTINCT CUSTOMER_ID \nFROM dbo.NOTIFICATION\nWHERE IS_READ = 0;'}, 'id': 'tooluse_l_vou1pPTHWRresWHCqnvg'}]
 Tool Calls:
-run_safe_diagnostic (tooluse_CBvB-H5VRP-x-XnGoATY2g)
-Call ID: tooluse_CBvB-H5VRP-x-XnGoATY2g
-Args:
+  run_safe_diagnostic (tooluse_l_vou1pPTHWRresWHCqnvg)
+ Call ID: tooluse_l_vou1pPTHWRresWHCqnvg
+  Args:
+    db: master
+    sql: SELECT DISTINCT CUSTOMER_ID
+FROM dbo.NOTIFICATION
+WHERE IS_READ = 0;
+================================= Tool Message =================================
+Name: run_safe_diagnostic
+
+Error: ToolException('Error executing tool run_safe_diagnostic: (pyodbc.ProgrammingError) (\'42S22\', "[42S22] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Invalid column name \'CUSTOMER_ID\'. (207) (SQLExecDirectW)")\n[SQL: SELECT DISTINCT CUSTOMER_ID \nFROM dbo.NOTIFICATION\nWHERE IS_READ = 0;]\n(Background on this error at: https://sqlalche.me/e/20/f405)')
+ Please fix your mistakes.
+================================== Ai Message ==================================
+
+[{'type': 'text', 'text': 'Oops, it seems the dbo.NOTIFICATION table does not have a CUSTOMER_ID column. Let me check the table schema first:'}, {'type': 'tool_use', 'name': 'get_table_schema', 'input': {'db': 'master', 'table': 'NOTIFICATION'}, 'id': 'tooluse_Ik7C2avnR4uDyb1ZpDGxCw'}]
+Tool Calls:
+  get_table_schema (tooluse_Ik7C2avnR4uDyb1ZpDGxCw)
+ Call ID: tooluse_Ik7C2avnR4uDyb1ZpDGxCw
+  Args:
+    db: master
+    table: NOTIFICATION
+================================= Tool Message =================================
+Name: get_table_schema
+
+[{"COLUMN_NAME": "NOTI_ID", "DATA_TYPE": "bigint", "IS_NULLABLE": "NO"}, {"COLUMN_NAME": "CUST_ID", "DATA_TYPE": "varchar", "IS_NULLABLE": "YES"}, {"COLUMN_NAME": "SUBJECT_TH", "DATA_TYPE": "varchar", "IS_NULLABLE": "YES"}, {"COLUMN_NAME": "SUBJECT_EN", "DATA_TYPE": "varchar", "IS_NULLABLE": "YES"}, ..., {"COLUMN_NAME": "IMAGE_ACTION_2", "DATA_TYPE": "varchar", "IS_NULLABLE": "YES"}]
+================================== Ai Message ==================================
+
+[{'type': 'text', 'text': "Ah I see, the customer ID column is named CUST_ID. Let's try the query again with the correct column name:"}, {'type': 'tool_use', 'name': 'run_safe_diagnostic', 'input': {'db': 'master', 'sql': 'SELECT DISTINCT CUST_ID\nFROM dbo.NOTIFICATION  \nWHERE IS_READ = 0;'}, 'id': 'tooluse_625QEvaeSjeynA9raV4K6g'}]
+Tool Calls:
+  run_safe_diagnostic (tooluse_625QEvaeSjeynA9raV4K6g)
+ Call ID: tooluse_625QEvaeSjeynA9raV4K6g
+  Args:
     db: master
     sql: SELECT DISTINCT CUST_ID
 FROM dbo.NOTIFICATION
@@ -107,15 +123,21 @@ WHERE IS_READ = 0;
 Name: run_safe_diagnostic
 
 [
-{
-    "CUST_ID": "lj2koe562"
-}
+  {
+    "cpu_time": 2,
+    "logical_reads": 651,
+    "rows": [
+      {
+        "CUST_ID": "lj2koe562"
+      }
+    ]
+  }
 ]
 ================================== Ai Message ==================================
 
-This query selects the distinct CUST_ID values from the NOTIFICATION table where the IS_READ column is 0, indicating the notification has not been read yet.
+The query returns a list of distinct CUST_ID values from the NOTIFICATION table where the IS_READ column is 0, indicating unread notifications.
 
-The result shows that the customer with ID "lj2koe562" has an unread notification in this table.
+Based on the result, the customer ID "lj2koe562" has unread notifications in this table.
 ```
 
 ## Development

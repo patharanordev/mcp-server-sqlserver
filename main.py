@@ -1,3 +1,4 @@
+import re
 from fastmcp import FastMCP
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -22,6 +23,8 @@ def get_connection(db):
         "?driver=ODBC+Driver+18+for+SQL+Server"
         f"&Encrypt={settings.encrypt}"
         f"&TrustServerCertificate={settings.trust_server_certificate}"
+        # Enable MARS (Multiple Active Result Sets) to allow executing multiple queries (or interleaved result sets) on a single connection.
+        "&MARS_Connection=Yes"
     )
         
     print("Connection string:", conn_str)
@@ -32,22 +35,22 @@ def get_connection(db):
     
 async def query_table_schema(engine, schema: str, table: str):
     async with engine.connect() as conn:
-        result = await conn.execute(text("""
-            SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table
-        """), {"schema": schema, "table": table})
+        result = await conn.execute(text(
+            "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE "
+            "FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table"
+        ), {"schema": schema, "table": table})
 
         rows = result.mappings().all()
         return json.dumps([dict(row) for row in rows]) 
 
 async def query_tables_in_schema(engine, schema: str = "dbo"):
     async with engine.connect() as conn:
-        result = await conn.execute(text("""
-            SELECT TABLE_NAME
-            FROM INFORMATION_SCHEMA.TABLES
-            WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_SCHEMA = :schema
-        """), {"schema": schema})
+        result = await conn.execute(text(
+            "SELECT TABLE_NAME "
+            "FROM INFORMATION_SCHEMA.TABLES "
+            "WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_SCHEMA = :schema"
+        ), {"schema": schema})
 
         rows = result.scalars().all()
         return rows
@@ -169,15 +172,47 @@ async def query_top_waits(engine):
                 wait_time_ms DESC
         """))
         return [dict(row._mapping) for row in result]
-    
+
+def get_query_type(sql: str) -> str:
+    match = re.match(r"^\s*(\w+)", sql.strip(), re.IGNORECASE)
+    return match.group(1).upper() if match else "UNKNOWN"
+
 async def exec_safe_diagnostic(engine, sql: str):
     async with engine.connect() as conn:
         trans = await conn.begin()
         try:
+            query_type = get_query_type(sql)
+            print(f"Detected query type: {query_type}")
+            
+            # Enable statistics only for SELECT or known diagnostic types
+            if query_type in ("SELECT", "SHOW", "EXPLAIN", "WITH"):
+                await conn.execute(text("SET STATISTICS TIME ON;"))
+                await conn.execute(text("SET STATISTICS IO ON;"))
+
             result = await conn.execute(text(sql))
             rows = result.fetchall()
+
+            # Stats:
+            # - @@SPID or Server Process ID is a built-in global function in SQL Server.
+            #   it returns the session ID of the current connection (the ID SQL Server assigns to your session).
+            # - cpu_time is in microseconds
+            stats_result = await conn.execute(text(
+                "SELECT "
+                    "r.cpu_time AS cpu_time, "
+                    "r.logical_reads AS logical_reads "
+                "FROM sys.dm_exec_requests r "
+                "WHERE r.session_id = @@SPID"
+            ))
+            stats = stats_result.mappings().fetchone()
+
             await trans.rollback()  # Rollback to prevent any changes
-            return [dict(row._mapping) for row in rows]
+            
+            return [{
+                "cpu_time": stats["cpu_time"],
+                "logical_reads": stats["logical_reads"],
+                "rows": [dict(row._mapping) for row in rows]
+            }]
+        
         except Exception as e:
             await trans.rollback()
             raise e
@@ -322,16 +357,16 @@ async def run_safe_diagnostic(db:str, sql: str) -> list:
     Returns:
         list: A list of rows (as dictionaries) returned by the SQL query.
     """
-    columns = []
+    diagnostics = []
     engine = get_connection(db)
     try:
-        columns = await exec_safe_diagnostic(engine, sql)
-        for col in columns:
-            print(col)
+        diagnostics = await exec_safe_diagnostic(engine, sql)
+        for item in diagnostics:
+            print(item)
     finally:
         await engine.dispose()
         
-    return columns
+    return diagnostics
 
 # ------------------------------------------------------
 
@@ -380,21 +415,12 @@ if __name__ == "__main__":
         transport = AppTransport(settings.app_transport)
         if transport == AppTransport.STDIO:
             mcp.run(transport=settings.app_transport)
-        elif transport == AppTransport.STREAM:
+        elif transport in [AppTransport.STREAM, AppTransport.SSE]:
             mcp.run(
                 transport=settings.app_transport, 
                 host=settings.app_host, 
                 port=settings.app_port, 
                 path=settings.app_path,
-                log_level=settings.app_log_level
-            )
-        elif transport == AppTransport.SSE:
-            mcp.run(
-                transport=settings.app_transport, 
-                host=settings.app_host, 
-                port=settings.app_port, 
-                path=settings.app_path,
-                # message_path=settings.app_message_path,
                 log_level=settings.app_log_level
             )
         else:
